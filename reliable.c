@@ -11,6 +11,7 @@
 #include <sys/socket.h>
 #include <sys/uio.h>
 #include <netinet/in.h>
+#include <stdbool.h>
 
 #include "rlib.h"
 #include "buffer.h"
@@ -66,6 +67,7 @@ struct reliable_state {
     int EOF_RECV;
     int EOF_ACK_RECV;
     int EOF_seqno;
+    FILE *fptr;
 
 
 
@@ -118,7 +120,7 @@ rel_create (conn_t *c, const struct sockaddr_storage *ss, const struct config_co
     /*sender*/
     r->SND_UNA = 1;
     r->SND_NXT = 1;
-    r->SND_MAXWND = cc -> window;
+    r->MAXWND = cc -> window;
     r->TIME_OUT = cc -> timeout;
 
     /*receiver*/
@@ -129,6 +131,9 @@ rel_create (conn_t *c, const struct sockaddr_storage *ss, const struct config_co
     r->EOF_RECV = 0;
     r->EOF_ACK_RECV = 0;
     r->EOF_seqno = 0;
+
+    r->fptr = fopen("./mycodeErrLog.txt", "w");
+
       
     return r;
 }
@@ -149,6 +154,10 @@ rel_destroy (rel_t *r)
     free(r->rec_buffer);
 }
 
+bool is_ACK(packet_t* pkt) {
+	return (ntohs(pkt->len) == 8);
+}
+
 // n is the expected length of pkt
 void
 rel_recvpkt (rel_t *r, packet_t *pkt, size_t n)
@@ -156,20 +165,69 @@ rel_recvpkt (rel_t *r, packet_t *pkt, size_t n)
     uint16_t rec_len = ntohs(pkt->len);
     uint16_t rec_cksum = ntohs(pkt->cksum);
     uint32_t rec_seqno = ntohl(pkt->seqno);
+    uint32_t rec_ackno = ntohl(pkt->ackno);
     /*cksum: 16-bit IP checksum (you can set the cksum field to 0 and use the cksum(const void *, int)
     function on a packet to compute the value of the checksum that should be in there).*/
     /*discard if the packet is corrupted*/
     
-    pkt -> cksum = uint16_t 0;
+    pkt -> cksum = 0;
 
-    if (len != n || rec_cksum != cksum(pkt, (int) rec_len) {
+    if (rec_len != n || rec_cksum != cksum(pkt, (int) rec_len)) {
 		return;
 	}
 
     pkt -> cksum = rec_cksum;
 
-    
+    if (is_ACK(pkt)) {
+    /*if the packet is an ACK*/
+        fprintf(r->fptr, "ACKACKACKACKACK\n\n\n");
+		if (rec_ackno == r->EOF_seqno + 1) {
+			/*if the ACK is for the EOF packet*/
+			r->EOF_ACK_RECV = 1;
+			if (r->EOF_SENT && r->EOF_RECV && r->EOF_ACK_RECV) {
+				/*if all EOF flags are set, close the connection*/
+				rel_destroy(r);
+			}
+		} else {
+			/*if the ACK is for a data packet*/
+			int acked_packet_number = buffer_remove(r->send_buffer, rec_ackno);
+            fprintf(stderr, "Sender buffer removed acked packets: %x\n", acked_packet_number);			
+            
+            /*if (r->send_buffer->head == NULL) {
+				/*if the send buffer is empty, stop the timer
+				conn_timer(r->c, 0);
+			}*/
+		}
+	} else {
+		/*if the packet is a data packet*/
+		if (rec_seqno == r->EOF_seqno) {
+			/*if the packet is the EOF packet*/
+			r->EOF_RECV = 1;
+			if (r->EOF_SENT && r->EOF_RECV && r->EOF_ACK_RECV) {
+				/*if all EOF flags are set, close the connection*/
+				rel_destroy(r);
+			}
+		} else {
+			/*if the packet is a data packet*/
+			if (rec_seqno == r->RCV_NXT) {
+				/*if the packet is the next expected packet*/
+				r->RCV_NXT++;
+				conn_output(r->c, pkt->data, rec_len - 8);
+			}
+			/*send an ACK for the packet*/
+			packet_t* ack_pkt = xmalloc(sizeof(packet_t));
+			ack_pkt->len = htons(8);
+			ack_pkt->cksum = 0;
+			ack_pkt->ackno = htonl(rec_seqno);
+			ack_pkt->cksum = cksum(ack_pkt, 8);
+			conn_sendpkt(r->c, ack_pkt, 8);
+			free(ack_pkt);
+		}
+    } 
 }
+
+
+
 
 void
 rel_read (rel_t *s)
