@@ -129,13 +129,14 @@ rel_create (conn_t *c, const struct sockaddr_storage *ss, const struct config_co
     r->EOF_RECV = 0;
     r->EOF_ACK_RECV = 0;
     r->EOF_seqno = 0;
-
+      
     return r;
 }
 
 void
 rel_destroy (rel_t *r)
 {
+
     if (r->next) {
         r->next->prev = r->prev;
     }
@@ -152,6 +153,21 @@ rel_destroy (rel_t *r)
 void
 rel_recvpkt (rel_t *r, packet_t *pkt, size_t n)
 {
+    uint16_t rec_len = ntohs(pkt->len);
+    uint16_t rec_cksum = ntohs(pkt->cksum);
+    uint32_t rec_seqno = ntohl(pkt->seqno);
+    /*cksum: 16-bit IP checksum (you can set the cksum field to 0 and use the cksum(const void *, int)
+    function on a packet to compute the value of the checksum that should be in there).*/
+    /*discard if the packet is corrupted*/
+    
+    pkt -> cksum = uint16_t 0;
+
+    if (len != n || rec_cksum != cksum(pkt, (int) rec_len) {
+		return;
+	}
+
+    pkt -> cksum = rec_cksum;
+
     
 }
 
