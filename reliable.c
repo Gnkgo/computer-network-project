@@ -231,7 +231,38 @@ rel_recvpkt (rel_t *r, packet_t *pkt, size_t n)
 
 void
 rel_read (rel_t *s)
+
+
 {
+
+    int SND_UNA;
+    int SND_NXT;
+    int MAXWND;
+    int read_byte;
+    SND_UNA = s->SND_UNA;
+    SND_NXT = s->SND_NXT;
+    MAXWND = s->MAXWND;
+
+    /*It is already sent, and all done */
+    if(s->EOF_SENT){
+       return;
+    }
+
+    while ((SND_NXT - SND_UNA < MAXWND) && (!(s -> EOF_SENT) {
+        packet_t * pkt = (packet_t *) xmalloc(sizeof(512);
+        memset(packet, 0, sizeof(packet_t));
+    }
+    read_byte = conn_input(s->c, pkt->data, 500);
+    if (read_byte == -1) {
+        s -> EOF_SENT = 1;
+        s -> EOF_seqno = SND_NXT;
+        
+        pkt -> len = htons((uint16_t)12);
+        packet->ackno = htonl((uint32_t) 0); //EOF packet, ackno doesn't matter
+        packet->seqno = htonl((uint32_t) SND_NXT);
+        //moving the upper bound index
+        s->SND_NXT = s->SND_NXT + 1;
+    }
     /* Your logic implementation here */
 }
 
