@@ -130,7 +130,7 @@ rel_create (conn_t *c, const struct sockaddr_storage *ss, const struct config_co
     r->EOF_SENT = 0;
     r->EOF_RECV = 0;
     r->EOF_ACK_RECV = 0;
-    r->EOF_seqno = 0;
+    r->EOF_seqno = -1;
 
     r->fptr = fopen("./mycodeErrLog.txt", "w");
 
@@ -181,13 +181,13 @@ rel_recvpkt (rel_t *r, packet_t *pkt, size_t n)
     if (is_ACK(pkt)) {
     /*if the packet is an ACK*/
         fprintf(r->fptr, "ACKACKACKACKACK\n\n\n");
-		if (rec_ackno == r->EOF_seqno + 1) {
+		if (rec_ackno == r -> EOF_seqno + 1) {
 			/*if the ACK is for the EOF packet*/
 			r->EOF_ACK_RECV = 1;
-			if (r->EOF_SENT && r->EOF_RECV && r->EOF_ACK_RECV) {
+	    } 
+        if (r->EOF_SENT && r->EOF_RECV && r->EOF_ACK_RECV) {
 				/*if all EOF flags are set, close the connection*/
-				rel_destroy(r);
-			}
+		    rel_destroy(r);
 		} else {
 			/*if the ACK is for a data packet*/
 			int acked_packet_number = buffer_remove(r->send_buffer, rec_ackno);
