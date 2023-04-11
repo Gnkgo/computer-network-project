@@ -85,8 +85,7 @@ rel_t *
     int single_connection;         Exit after first connection failure 
 };*/
 
-rel_create (conn_t *c, const struct sockaddr_storage *ss, const struct config_common *cc)
-{
+rel_create (conn_t *c, const struct sockaddr_storage *ss, const struct config_common *cc) {
     rel_t *r;
 
     r = xmalloc (sizeof (*r));
@@ -134,13 +133,10 @@ rel_create (conn_t *c, const struct sockaddr_storage *ss, const struct config_co
 
     r->fptr = fopen("./mycodeErrLog.txt", "w");
 
-      
     return r;
 }
 
-void
-rel_destroy (rel_t *r)
-{
+void rel_destroy (rel_t *r) {
 
     if (r->next) {
         r->next->prev = r->prev;
@@ -155,14 +151,17 @@ rel_destroy (rel_t *r)
     free(r->rec_buffer);
 }
 
-bool is_ACK(packet_t* pkt) {
-	return (ntohs(pkt->len) == 8);
+int is_ACK(packet_t* pkt) {
+	if (ntohs(pkt->len) == 8) {
+        return 1;
+    } else if (ntohs(pkt -> len) > 8 && ntohs(pkt -> len) <= 520) {
+		return 0;
+	} else {
+		return -1;
 }
 
 // n is the expected length of pkt
-void
-rel_recvpkt (rel_t *r, packet_t *pkt, size_t n)
-{
+void rel_recvpkt (rel_t *r, packet_t *pkt, size_t n) {
     uint16_t rec_len = ntohs(pkt->len);
     uint16_t rec_cksum = ntohs(pkt->cksum);
     uint32_t rec_seqno = ntohl(pkt->seqno);
@@ -179,7 +178,7 @@ rel_recvpkt (rel_t *r, packet_t *pkt, size_t n)
 
     pkt -> cksum = rec_cksum;
 
-    if (is_ACK(pkt)) {
+    if (is_ACK(pkt) == 1) {
     /*if the packet is an ACK*/
         fprintf(r->fptr, "ACKACKACKACKACK\n\n\n");
 		if (rec_ackno == r -> EOF_seqno + 1) {
@@ -199,7 +198,7 @@ rel_recvpkt (rel_t *r, packet_t *pkt, size_t n)
 				conn_timer(r->c, 0);
 			}*/
 		}
-	} else {
+	} else if (is_ACK(pkt) == 0){
 		/*if the packet is a data packet*/
 		if (rec_seqno == r->EOF_seqno) {
 			/*if the packet is the EOF packet*/
@@ -224,7 +223,18 @@ rel_recvpkt (rel_t *r, packet_t *pkt, size_t n)
 			conn_sendpkt(r->c, ack_pkt, 8);
 			free(ack_pkt);
 		}
-    } 
+    } else {
+        return NULL;
+    }
+}
+
+/*https//stackoverflow.com/questions/10098441/get-the-current-time-in-milliseconds-in-c*/
+long currentTimeMillis() {
+  struct timeval time;
+  gettimeofday(&time, NULL);
+  int64_t s1 = (int64_t)(time.tv_sec) * 1000;
+  int64_t s2 = (time.tv_usec / 1000);
+  return s1 + s2;
 }
 
 /*function to check if the sender can send a packet*/
@@ -234,7 +244,7 @@ int should_send_packet(rel_t *s) {
 
 /*function to send a packet*/
 void send_packet(packet_t *packet, rel_t * s) {
-    buffer_insert(s->send_buffer, packet, get_current_system_time());
+    buffer_insert(s->send_buffer, packet, currentTimeMillis());
     conn_sendpkt(s->c, packet, (size_t) 12);
 }
 
@@ -254,6 +264,10 @@ void create_packet (packet_t * packet, rel_t * s, int read_byte) {
     packet -> chsum = cksum(packet, (int) (12 + read_byte ? read_byte != -1 : 0);
 
     s ->SND_NXT++;
+}
+
+int is_EOF(packet_t* packet){
+    return (ntohs(packet->len) == (uint16_t) 12 && ntohs(packet -> data 
 }
 
 void
@@ -298,15 +312,24 @@ rel_read (rel_t *s)
     }
 }
 
-void
-rel_output (rel_t *r)
-{
+
+/*
+typedef struct buffer_node {
+    packet_t packet;
+    long last_retransmit;
+    struct buffer_node* next;
+} buffer_node_t;
+
+typedef struct buffer {
+    buffer_node_t* head;
+} buffer_t;
+*/
+
+void rel_output (rel_t *r) {
     /* Your logic implementation here */
 }
 
-void
-rel_timer ()
-{
+void rel_timer () {
     // Go over all reliable senders, and have them send out
     // all packets whose timer has expired
     rel_t *current = rel_list;
