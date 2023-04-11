@@ -150,6 +150,7 @@ rel_destroy (rel_t *r)
 
     buffer_clear(r->send_buffer);
     free(r->send_buffer);
+
     buffer_clear(r->rec_buffer);
     free(r->rec_buffer);
 }
@@ -226,44 +227,75 @@ rel_recvpkt (rel_t *r, packet_t *pkt, size_t n)
     } 
 }
 
+/*function to check if the sender can send a packet*/
+int should_send_packet(rel_t *s) {
+	return (s->SND_NXT - s->SND_UNA < s->MAXWND) && (!s->EOF_SENT);
+}
 
+/*function to send a packet*/
+void send_packet(packet_t *packet, rel_t * s) {
+    buffer_insert(s->send_buffer, packet, get_current_system_time());
+    conn_sendpkt(s->c, packet, (size_t) 12);
+}
 
+/*function to updadte the flags when eof is reached*/
+void eof_update(rel_t * s) {
+    s -> EOF_seqno = SND_NXT;
+    s -> EOF_SENT = 1;
+}
+
+/*function to create a packet, goes for the case end of file and for normal data packets*/
+void create_packet (packet_t * packet, rel_t * s, int read_byte) {
+    packet -> len = htons((uint16_t) 12 + read_byte ? read_byte != -1 : 0);
+    packet -> seqno = htonl((uint32_t) SND_NXT);
+    packet -> ackno = htonl((uint32_t) 0);
+    
+    packet -> cksum = (uint16_t) 0;
+    packet -> chsum = cksum(packet, (int) (12 + read_byte ? read_byte != -1 : 0);
+
+    s ->SND_NXT++;
+}
 
 void
 rel_read (rel_t *s)
-
-
 {
-
-    int SND_UNA;
-    int SND_NXT;
-    int MAXWND;
+    int SND_UNA = s->SND_UNA;
+    int SND_NX = s->SND_NXTT;
+    int MAXWND = s->MAXWND;
     int read_byte;
-    SND_UNA = s->SND_UNA;
-    SND_NXT = s->SND_NXT;
-    MAXWND = s->MAXWND;
 
     /*It is already sent, and all done */
     if(s->EOF_SENT){
        return;
     }
 
-    while ((SND_NXT - SND_UNA < MAXWND) && (!(s -> EOF_SENT) {
-        packet_t * pkt = (packet_t *) xmalloc(sizeof(512);
+    /* while there is space in the window and there is data to send */
+    while (should_send_packet(s) {
+        packet_t * packet = (packet_t *) xmalloc(sizeof(512);
         memset(packet, 0, sizeof(packet_t));
+
+        /*malloc was not successfull, return NULL*/
+	    if (packet == NULL) {
+            return NULL;
+        }
+
+        /*conn_input returns -1 if EOF, 0 if no data, and otherwise the number of bytes read as data*/
+        int read_byte = conn_input(s->c, packet->data, 500);
+        if (read_byte == -1) {
+            create_packet(packet, s, read_byte);
+            eof_update(s);
+            send_packet(packet, s);
+        } else if (read_byte == 0) {
+            free(packet);
+		    break;
+	    } else {
+		    create_packet(packet, s, read_byte)
+            send_packet(packet, s);
+	    }
+        SND_UNA = s->SND_UNA;
+        SND_NXT = s->SND_NXT;
+        MAXWND = s->MAXWND;
     }
-    read_byte = conn_input(s->c, pkt->data, 500);
-    if (read_byte == -1) {
-        s -> EOF_SENT = 1;
-        s -> EOF_seqno = SND_NXT;
-        
-        pkt -> len = htons((uint16_t)12);
-        packet->ackno = htonl((uint32_t) 0); //EOF packet, ackno doesn't matter
-        packet->seqno = htonl((uint32_t) SND_NXT);
-        //moving the upper bound index
-        s->SND_NXT = s->SND_NXT + 1;
-    }
-    /* Your logic implementation here */
 }
 
 void
