@@ -256,6 +256,7 @@ void eof_update(rel_t * s) {
 
 /*function to create a packet, goes for the case end of file and for normal data packets*/
 void create_packet (packet_t * packet, rel_t * s, int read_byte) {
+    
     packet -> len = htons((uint16_t) 12 + read_byte ? read_byte != -1 : 0);
     packet -> seqno = htonl((uint32_t) SND_NXT);
     packet -> ackno = htonl((uint32_t) 0);
@@ -267,8 +268,24 @@ void create_packet (packet_t * packet, rel_t * s, int read_byte) {
 }
 
 int is_EOF(packet_t* packet){
-    return (ntohs(packet->len) == (uint16_t) 12 && ntohs(packet -> data 
+    return (ntohs(packet->len) == (uint16_t) 12 && ntohs(packet -> data));
 }
+
+ packet_t * create_packet(packet_t * packet, int len, int seqno, int ackno, int cksum, int isData) {
+    
+    packet -> len = htons((uint16_t) len);
+    packet -> ackno = htonl((uint32_t) ackno);
+
+    if (isData) {
+		packet -> seqno = htonl((uint32_t) seqno);
+	} 
+    
+    packet -> cksum = (uint16_t) 0;
+    packet -> chsum = cksum(packet, sum);
+    return packet;
+ }
+
+
 
 void
 rel_read (rel_t *s)
@@ -283,9 +300,25 @@ rel_read (rel_t *s)
        return;
     }
 
+    /*
+    packet_t packet{
+        uint16_t cksum;
+        uint16_t len;
+        uint32_t ackno;
+        uint32_t seqno;		/* Only valid if length > 8 
+        char data[500];
+    }
+
+    */
+
+
+
     /* while there is space in the window and there is data to send */
     while (should_send_packet(s) {
         packet_t * packet = (packet_t *) xmalloc(sizeof(512);
+
+        packet_t packet
+        packet_
         memset(packet, 0, sizeof(packet_t));
 
         /*malloc was not successfull, return NULL*/
@@ -325,9 +358,58 @@ typedef struct buffer {
 } buffer_t;
 */
 
+/*
+struct packet {
+    uint16_t cksum;
+    uint16_t len;
+    uint32_t ackno;
+    uint32_t seqno;		/* Only valid if length > 8 
+    char data[500];
+};
+typedef struct packet packet_t;
+*/
+
+
+/*when conn_output receives a packet with length 0:
+    if (n == 0) {
+        c->write_eof = 1;
+        if (!c->outq)
+            shutdown (c->wfd, SHUT_WR);
+        return 0;
+    }
+ */
 void rel_output (rel_t *r) {
     /* Your logic implementation here */
+
+    buffer_node_t first_node = get_first_node(r->send_buffer);
+
+    /* When we haven't rceived anything yet, we don't have to output anything*/
+    if (first_node == NULL) {
+		return;
+	}
+    /*check if packet in buffer can be sent to the output. Check whether the sequence number of the packet
+    matches the expected sequence number (RCV_NXT) and check whether there is enough space in the connection's output buffer
+    to accommodate the packet's data*/
+
+    packet_t * packet = &(first_node -> packet);
+    uint16_t packet_len = ntohs(packet -> len);
+    uint32_t packet_seqno = ntohl(packet -> seqno);
+    uint16_t packet_cksum = ntohs(packet -> cksum);
+    uint32_t packet_ackno = ntohl(packet -> ackno);
+
+    while(first_node != NULL && (ntohl(packet->seqno) == (uint32_t) r->RCV_NXT) && (conn_bufspace(r->c) >= (packet_length - 12))){
+        packet_len = ntohs(packet -> len);
+        packet_seqno = nthol(packet -> seqno);
+
+        if (is_EOF(packet)) {
+            conn_output(r->c, packet->data, htons(0)); /*check above what conn_output does when length is 0*/
+
+
+        }
+
 }
+
+
 
 void rel_timer () {
     // Go over all reliable senders, and have them send out
