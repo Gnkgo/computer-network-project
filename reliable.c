@@ -75,6 +75,56 @@ struct reliable_state {
 };
 rel_t *rel_list;
 
+/*helper functins */
+/*https//stackoverflow.com/questions/10098441/get-the-current-time-in-milliseconds-in-c*/
+long currentTimeMillis() {
+  struct timeval time;
+  gettimeofday(&time, NULL);
+  int64_t s1 = (int64_t)(time.tv_sec) * 1000;
+  int64_t s2 = (time.tv_usec / 1000);
+  return s1 + s2;
+}
+
+int isDone(rel_t * r) {
+    return (r->EOF_SENT && r->EOF_RECV && r->EOF_ACK_RECV && !r -> flushing && buffer_size(r->send_buffer) == 0);
+}
+
+/*function to check if the sender can send a packet*/
+int should_send_packet(rel_t *s) {
+	return (s->SND_NXT - s->SND_UNA < s->MAXWND) && (!s->EOF_SENT);
+}
+
+/*function to send a packet*/
+void send_packet(packet_t *packet, rel_t * s) {
+    buffer_insert(s->send_buffer, packet, currentTimeMillis());
+    conn_sendpkt(s->c, packet, (size_t) 12);
+}
+
+/*function to updadte the flags when eof is reached*/
+void eof_update(rel_t * s) {
+    s -> EOF_seqno = s -> SND_NXT;
+    s -> EOF_SENT = 1;
+}
+
+
+
+int is_EOF(packet_t* packet){
+    return (ntohs(packet->len) == (uint16_t) 12;
+}
+
+void create_packet(packet_t * packet, int len, int seqno, int ackno, int cksum, int isData) {
+    
+    packet -> len = htons((uint16_t) len);
+    packet -> ackno = htonl((uint32_t) ackno);
+
+    if (isData) {
+		packet -> seqno = htonl((uint32_t) seqno);
+	} 
+    
+    packet -> cksum = (uint16_t) 0;
+    packet -> chsum = cksum(packet, cksum);
+ }
+
 /* Creates a new reliable protocol session, returns NULL on failure.
 * ss is always NULL */
 rel_t *
@@ -86,7 +136,11 @@ rel_t *
     int single_connection;         Exit after first connection failure 
 };*/
 
-rel_create (conn_t *c, const struct sockaddr_storage *ss, const struct config_common *cc) {
+
+/* Creates a new reliable protocol session, returns NULL on failure.
+* ss is always NULL */
+
+rel_t * rel_create (conn_t *c, const struct sockaddr_storage *ss, const struct config_common *cc) {
     rel_t *r;
 
     r = xmalloc (sizeof (*r));
@@ -230,54 +284,7 @@ void rel_recvpkt (rel_t *r, packet_t *pkt, size_t n) {
     }
 }
 
-/*https//stackoverflow.com/questions/10098441/get-the-current-time-in-milliseconds-in-c*/
-long currentTimeMillis() {
-  struct timeval time;
-  gettimeofday(&time, NULL);
-  int64_t s1 = (int64_t)(time.tv_sec) * 1000;
-  int64_t s2 = (time.tv_usec / 1000);
-  return s1 + s2;
-}
 
-int isDone(rel_t * r) {
-    return (r->EOF_SENT && r->EOF_RECV && r->EOF_ACK_RECV && !r -> flushing && buffer_size(r->send_buffer) == 0);
-}
-
-/*function to check if the sender can send a packet*/
-int should_send_packet(rel_t *s) {
-	return (s->SND_NXT - s->SND_UNA < s->MAXWND) && (!s->EOF_SENT);
-}
-
-/*function to send a packet*/
-void send_packet(packet_t *packet, rel_t * s) {
-    buffer_insert(s->send_buffer, packet, currentTimeMillis());
-    conn_sendpkt(s->c, packet, (size_t) 12);
-}
-
-/*function to updadte the flags when eof is reached*/
-void eof_update(rel_t * s) {
-    s -> EOF_seqno = SND_NXT;
-    s -> EOF_SENT = 1;
-}
-
-
-
-int is_EOF(packet_t* packet){
-    return (ntohs(packet->len) == (uint16_t) 12 && ntohs(packet -> data));
-}
-
-void create_packet(packet_t * packet, int len, int seqno, int ackno, int cksum, int isData) {
-    
-    packet -> len = htons((uint16_t) len);
-    packet -> ackno = htonl((uint32_t) ackno);
-
-    if (isData) {
-		packet -> seqno = htonl((uint32_t) seqno);
-	} 
-    
-    packet -> cksum = (uint16_t) 0;
-    packet -> chsum = cksum(packet, sum);
- }
 
 
 
