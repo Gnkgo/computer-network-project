@@ -17,6 +17,8 @@
 #include "rlib.h"
 #include "buffer.h"
 
+//Helper functions, defined at the bottom of the file
+
 long currentTimeMillis();
 bool isDone(rel_t * r);
 bool should_send_packet(rel_t *s);
@@ -25,8 +27,6 @@ int is_EOF(packet_t* packet);
 void create_packet(packet_t * packet, int len, int seqno, int ackno, int isData);
 bool is_ACK(packet_t* packet);
 int max(int num1, int num2);
-
-
 
 struct reliable_state {
     rel_t *next;			/* Linked list for traversing all connections */
@@ -52,9 +52,6 @@ struct reliable_state {
     int MAXWND;
     int timeout;
 
-    int RCV_NXT;
-    int RCV_WND;
-
     /* ----------------------------RECEIVER----------------------------
     we need the following information: 
     RCV.NXT:            represents sequence number of the next byte that the sender will send
@@ -72,10 +69,12 @@ struct reliable_state {
     send back ACK with cumulative ackno = RCV.NXT
     -> see PDF page 25*/
 
+    int RCV_NXT;
+    int RCV_WND;
+
     /* ----------------------------ERROR_FLAGS----------------------------
     We need to keep track of the end of files*/
 
-    int EOF_ERR;
     int EOF_SENT;
     int EOF_RECV;
     int EOF_ACK_RECV;
@@ -140,19 +139,10 @@ rel_t * rel_create (conn_t *c, const struct sockaddr_storage *ss, const struct c
     /*receiver*/
     r->RCV_NXT = 1;
 
-    /*error*/
-    r -> EOF_SENT = 0;
-    r -> EOF_RECV = 0;
-    r -> EOF_ACK_RECV = 0;
-    r -> EOF_seqno = 0;
-    r -> flushing = 0;
-
-
     return r;
 }
 
 void rel_destroy (rel_t *r) {
-
     if (r->next) {
         r->next->prev = r->prev;
     }
@@ -166,284 +156,136 @@ void rel_destroy (rel_t *r) {
     free(r->rec_buffer);
 }
 
+void rel_recvpkt(rel_t *r, packet_t *pkt, size_t n) {
+    uint16_t len = ntohs(pkt->len);
+    uint16_t cksum_old = ntohs(pkt->cksum);
+    uint16_t seqno = ntohl(pkt->seqno);
 
+    pkt->cksum = 0;
 
-
-
-void
-rel_recvpkt (rel_t *r, packet_t *pkt, size_t n)
-{
-
-    uint16_t packet_length = ntohs(pkt->len);
-    uint16_t packet_cksum_old = ntohs(pkt->cksum);
-    uint16_t packet_seqno = ntohl(pkt->seqno);
-
-    uint16_t cksum_old_to_restore = pkt->cksum;
-    pkt->cksum = (uint16_t) 0;
-
-
-    if((packet_length != (uint16_t) n) || (packet_cksum_old != ntohs(cksum(pkt, (int) packet_length)))){
-
+    if (len != n || cksum_old != ntohs(cksum(pkt, len))) {
         return;
     }
-    pkt->cksum = cksum_old_to_restore;
 
-    if (is_ACK(pkt)){
+    if (is_ACK(pkt) && pkt->ackno == r->EOF_seqno + 1) {
+        r->EOF_ACK_RECV = 1;
+    }
 
-        if(pkt->ackno == r->EOF_seqno + 1){
-            r->EOF_ACK_RECV = 1;
+    if (isDone(r)) {
+        rel_destroy(r);
+        return;
+    }
+
+    if (is_ACK(pkt)) {
+        buffer_remove(r->send_buffer, ntohl(pkt->ackno));
+        r->SND_UNA = max(ntohl(pkt->ackno), r->SND_UNA);
+        rel_read(r);
+    } else if (seqno < r->RCV_NXT) {
+        if (seqno != 0) {
+            struct ack_packet* ack_pac = xmalloc(sizeof(struct ack_packet));
+            create_packet((packet_t*)ack_pac, 8, -1, r->RCV_NXT, 0);
+            conn_sendpkt(r->c, (packet_t*)ack_pac, 8);
+            free(ack_pac);
         }
-
-
-
-        int acked_packet_number = buffer_remove(r->send_buffer, (uint32_t) ntohl(pkt->ackno));
-
-
-        r->SND_UNA = max((int) ntohl(pkt->ackno), r->SND_UNA);
-
-
-
-        if(isDone(r)){
-
-            rel_destroy(r);
-            return;
+    } else if (seqno < r->RCV_NXT + r->MAXWND && conn_bufspace(r->c) >= len - 12) {
+        if (!buffer_contains(r->rec_buffer, ntohl(pkt->seqno))) {
+            buffer_insert(r->rec_buffer, pkt, currentTimeMillis());
         }
-            rel_read(r);
-
-
-//        return NULL;
-    }else{
-
-        if(packet_seqno >= r->RCV_NXT){
-
-
-            int MAXWND = r->MAXWND;
-
-
-            if(packet_seqno >= r->RCV_NXT + r->MAXWND){
-
-                return;
-            }else{
-                if(conn_bufspace(r->c) >= (packet_length - 12)){
-                    if(!buffer_contains(r->rec_buffer, ntohl(pkt->seqno))) {
-                        buffer_insert(r->rec_buffer, pkt, currentTimeMillis());
-                    }
-                    rel_output(r);
-                }else{
-                    return;
-                }
-            }
-        }else{
-            if(packet_seqno != 0){
-                for(int i = 0; i < 1;i++){
-                    struct ack_packet* ack_pac = xmalloc(sizeof(struct ack_packet));
-                    ack_pac->ackno = htonl((uint32_t) (r->RCV_NXT));
-                    ack_pac->len = htons ((uint16_t) 8);
-                    ack_pac->cksum = (uint16_t) 0;
-                    ack_pac->cksum = cksum(ack_pac, (int) 8);
-                    conn_sendpkt(r->c, (packet_t *)ack_pac, (size_t) 8);
-                    free(ack_pac);
-                }
-                return;
-            }
-        }
+        rel_output(r);
     }
 }
 
 
 
-
-void rel_output (rel_t *r) {
-
+void rel_output(rel_t *r) {
     buffer_node_t* first_node = buffer_get_first(r->rec_buffer);
-
-    if(first_node == NULL){
-        return;
-    }
-
+    if (!first_node) return;
     packet_t* packet = &(first_node->packet);
-    uint16_t packet_length = ntohs(packet->len);
-    uint16_t packet_seqno = ntohl(packet->seqno);
-    while((first_node != NULL) &&
-          (ntohl(packet->seqno) == (uint32_t) r->RCV_NXT) &&
-          (conn_bufspace(r->c) >= (packet_length - 12))){
-        packet_length = ntohs(packet->len);
-        packet_seqno = ntohl(packet->seqno);
-
-        if(is_EOF(packet)){
-
-            conn_output(r->c, packet->data, htons(0)); //send a signal to output by calling conn_output with len 0
-
-            buffer_remove_first(r->rec_buffer); //remove either EOF or Data packet whatever
-            r->RCV_NXT ++;
+    while (first_node && ntohl(packet->seqno) == (uint32_t) r->RCV_NXT && conn_bufspace(r->c) >= ntohs(packet->len) - 12) {
+        if (is_EOF(packet)) {
+            conn_output(r->c, packet->data, htons(0));
+            buffer_remove_first(r->rec_buffer);
+            r->RCV_NXT++;
             r->EOF_RECV = 1;
-
             struct ack_packet* ack_pac = xmalloc(sizeof(struct ack_packet));
-            ack_pac->ackno = htonl((uint32_t) (r->RCV_NXT));
-            ack_pac->len = htons ((uint16_t) 8);
-            ack_pac->cksum = (uint16_t) 0;
-            ack_pac->cksum = cksum(ack_pac, (int) 8);
+            create_packet((packet_t *) ack_pac, 8, -1, r->RCV_NXT, 0);
             conn_sendpkt(r->c, (packet_t *)ack_pac, (size_t) 8);
-
-
             free(ack_pac);
-
-
-
-            if(r->EOF_ACK_RECV && r->EOF_SENT &&r->EOF_RECV && !r->flushing && buffer_size(r->send_buffer) == 0){
-
-
+            if (isDone(r)) {
                 rel_destroy(r);
                 return;
             }
-
-
-        }else{ //is not EOF!!!!!
-
-            int bytes_flushed;
-            if(conn_bufspace(r->c) >= (packet_length - 12)){
-                r->flushing = 1;
-                bytes_flushed = conn_output(r->c, packet->data, (size_t) (packet_length - 12));
-
-
-
-                buffer_remove_first(r->rec_buffer); //remove either EOF or Data packet whatever
-                r->RCV_NXT ++;
-
-                r->flushing = 0;
-
-                struct ack_packet* ack_pac = xmalloc(sizeof(struct ack_packet));
-                ack_pac->ackno = htonl((uint32_t) (r->RCV_NXT));
-                ack_pac->len = htons ((uint16_t) 8);
-                ack_pac->cksum = (uint16_t) 0;
-                ack_pac->cksum = cksum(ack_pac, (int) 8);
-
-                conn_sendpkt(r->c, (packet_t *)ack_pac, (size_t) 8);
-
-
-                free(ack_pac);
-
-            }else{
-                bytes_flushed = -1;
-
-            }
+        } else if (conn_bufspace(r->c) >= ntohs(packet->len) - 12) {
+            r->flushing = 1;
+            conn_output(r->c, packet->data, ntohs(packet->len) - 12);
+            buffer_remove_first(r->rec_buffer);
+            r->RCV_NXT++;
+            r->flushing = 0;
+            struct ack_packet* ack_pac = xmalloc(sizeof(struct ack_packet));
+            create_packet((packet_t *) ack_pac, 8, -1, r->RCV_NXT, 0);
+            conn_sendpkt(r->c, (packet_t *)ack_pac, (size_t) 8);
+            free(ack_pac);
         }
-
-
-
         first_node = buffer_get_first(r->rec_buffer);
-        if(first_node != NULL){
-            packet = &(first_node->packet);
-        }
-
-        packet_length = ntohs(packet->len);
-        packet_seqno = ntohl(packet->seqno);
+        if (first_node) packet = &(first_node->packet);
     }
-
 }
 
 
 
 
-
-
-
-void
-rel_read (rel_t *s)
-{
-    int SND_UNA;
-    int SND_NXT;
-    int MAXWND;
-    int read_byte;
-    SND_UNA = s->SND_UNA;
-    SND_NXT = s->SND_NXT;
-    MAXWND = s->MAXWND;
-
+void rel_read (rel_t *s) {
     if((s->EOF_SENT)){
-
        return;
     }
 
     while(should_send_packet(s)) {
         packet_t *packet = (packet_t *) xmalloc(512);
         memset(packet, 0 , sizeof(packet_t));
-        read_byte = conn_input(s->c, packet->data, 500);
+        int read_byte = conn_input(s->c, packet->data, 500);
+        int SND_NXT = s->SND_NXT;
+
+        if (read_byte == 0) {
+            free(packet);
+            break;
+        }
 
         if (read_byte == -1) {
             s->EOF_SENT = 1;
-            s->EOF_seqno = s->SND_NXT;
-
-            packet->len = htons((uint16_t) 12);
-            packet->ackno = htonl((uint32_t) 0); //EOF packet, ackno doesn't matter
-            packet->seqno = htonl((uint32_t) SND_NXT);
-            s->SND_NXT = s->SND_NXT + 1;
-
-            packet->cksum = (uint16_t) 0;
-            packet->cksum = cksum(packet, 12);
-
-            buffer_insert(s->send_buffer, packet, currentTimeMillis());
-            conn_sendpkt(s->c, packet, (size_t) 12);
-
-        } else if (read_byte == 0) {
-            free(packet);
-            break;
+            s->EOF_seqno = SND_NXT;
+            create_packet(packet, 12, SND_NXT, 0, 1);
         } else {
-            packet->len = htons((uint16_t)(12 + read_byte));
-            packet->ackno = htonl((uint32_t) 0); //data packet, ackno doesn't matter
-            packet->cksum = htons((uint16_t) 0);
-            packet->seqno = htonl((uint32_t) SND_NXT);
-            s->SND_NXT = s->SND_NXT + 1;
-
-            packet->cksum = (uint16_t) 0;
-            packet->cksum = cksum(packet, 12 + read_byte);
-
-            buffer_insert(s->send_buffer, packet, currentTimeMillis());
-
-            conn_sendpkt(s->c, packet, (size_t) (12 + read_byte));
+            create_packet(packet, 12 + read_byte, SND_NXT, 0, 1);
         }
-        free(packet);
-        SND_UNA = s->SND_UNA;
-        SND_NXT = s->SND_NXT;
-        MAXWND = s->MAXWND;
 
+        s->SND_NXT++;
+        send_packet(packet, s);
+        free(packet);
     }
 }
 
-void
-rel_timer ()
-{
-
+void rel_timer() {
     rel_t *current = rel_list;
-    while (current != NULL) {
+    while (current) {
         buffer_node_t* node = buffer_get_first(current->send_buffer);
-        packet_t* packet;
-        int i = 1;
-
-        while(i > 0 && node != NULL){
-          if(node != NULL) {
-              packet = &node->packet;
-              long cur_time = currentTimeMillis();
-              long last_time = node->last_retransmit;
-              long timeout = current->timeout;
-
-              if ((cur_time - last_time) >= timeout) {
-
-                  conn_sendpkt(current->c, packet, (size_t)(ntohs(packet->len)));
-                  node->last_retransmit = cur_time;
-              }
-
-          }
-            i--;
+        while (node) {
+            long cur_time = currentTimeMillis();
+            long last_time = node->last_retransmit;
+            long timeout = current->timeout;
+            if ((cur_time - last_time) >= timeout) {
+                conn_sendpkt(current->c, &(node->packet), (size_t) ntohs(node->packet.len));
+                node->last_retransmit = cur_time;
+            }
             node = node->next;
         }
         current = current->next;
-
     }
 }
 
 
 
 
+//-----------------------------------------------------------------------------------------------------------
 
 /*helper functins */
 /*https//stackoverflow.com/questions/10098441/get-the-current-time-in-milliseconds-in-c*/
@@ -467,23 +309,21 @@ bool should_send_packet(rel_t *s) {
 /*function to send a packet*/
 void send_packet(packet_t * packet, rel_t * s) {
     buffer_insert(s->send_buffer, packet, currentTimeMillis());
-    conn_sendpkt(s->c, packet, (size_t) 12);
+    conn_sendpkt(s->c, packet, (size_t) ntohs(packet -> len));
 }
-
 
 int is_EOF(packet_t* packet){
     return (ntohs(packet->len) == (uint16_t) 12);
 }
 
 void create_packet(packet_t * packet, int len, int seqno, int ackno, int isData) {
-    
     packet -> len = htons((uint16_t) len);
     packet -> ackno = htonl((uint32_t) ackno);
 
     if (isData) {
 		packet -> seqno = htonl((uint32_t) seqno);
 	} 
-    
+
     packet -> cksum = (uint16_t) 0;
     packet -> cksum = cksum(packet, len);
  }
