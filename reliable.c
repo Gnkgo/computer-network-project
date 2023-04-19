@@ -19,7 +19,7 @@
 
 long currentTimeMillis();
 bool isDone(rel_t * r);
-int should_send_packet(rel_t *s);
+bool should_send_packet(rel_t *s);
 void send_packet(packet_t * packet, rel_t * s);
 int is_EOF(packet_t* packet);
 void create_packet(packet_t * packet, int len, int seqno, int ackno, int isData);
@@ -170,8 +170,10 @@ void rel_destroy (rel_t *r) {
 
 
 
-// n is the expected length of pkt
-void rel_recvpkt (rel_t *r, packet_t *pkt, size_t n) {
+void
+rel_recvpkt (rel_t *r, packet_t *pkt, size_t n)
+{
+
     uint16_t packet_length = ntohs(pkt->len);
     uint16_t packet_cksum_old = ntohs(pkt->cksum);
     uint16_t packet_seqno = ntohl(pkt->seqno);
@@ -179,28 +181,47 @@ void rel_recvpkt (rel_t *r, packet_t *pkt, size_t n) {
     uint16_t cksum_old_to_restore = pkt->cksum;
     pkt->cksum = (uint16_t) 0;
 
+
     if((packet_length != (uint16_t) n) || (packet_cksum_old != ntohs(cksum(pkt, (int) packet_length)))){
+
         return;
     }
     pkt->cksum = cksum_old_to_restore;
 
     if (is_ACK(pkt)){
+
         if(pkt->ackno == r->EOF_seqno + 1){
             r->EOF_ACK_RECV = 1;
         }
-        //int acked_packet_number = buffer_remove(r->send_buffer, (uint32_t) ntohl(pkt->ackno));
+
+
+
+        int acked_packet_number = buffer_remove(r->send_buffer, (uint32_t) ntohl(pkt->ackno));
+
+
         r->SND_UNA = max((int) ntohl(pkt->ackno), r->SND_UNA);
 
+
+
         if(isDone(r)){
+
             rel_destroy(r);
             return;
         }
             rel_read(r);
 
+
+//        return NULL;
     }else{
+
         if(packet_seqno >= r->RCV_NXT){
-            //int MAXWND = r->MAXWND;
+
+
+            int MAXWND = r->MAXWND;
+
+
             if(packet_seqno >= r->RCV_NXT + r->MAXWND){
+
                 return;
             }else{
                 if(conn_bufspace(r->c) >= (packet_length - 12)){
@@ -209,7 +230,6 @@ void rel_recvpkt (rel_t *r, packet_t *pkt, size_t n) {
                     }
                     rel_output(r);
                 }else{
-
                     return;
                 }
             }
@@ -221,13 +241,11 @@ void rel_recvpkt (rel_t *r, packet_t *pkt, size_t n) {
                     ack_pac->len = htons ((uint16_t) 8);
                     ack_pac->cksum = (uint16_t) 0;
                     ack_pac->cksum = cksum(ack_pac, (int) 8);
-
                     conn_sendpkt(r->c, (packet_t *)ack_pac, (size_t) 8);
                     free(ack_pac);
                 }
                 return;
             }
-
         }
     }
 }
@@ -235,180 +253,196 @@ void rel_recvpkt (rel_t *r, packet_t *pkt, size_t n) {
 
 
 
-
-void rel_read (rel_t *s) {
-    //int SND_UNA = s->SND_UNA;
-    int SND_NXT = s->SND_NXT;
-   // int MAXWND = s->MAXWND;
-    int read_byte;
-
-    /*It is already sent, and all done */
-    if(s->EOF_SENT){
-       return;
-    }
-
-    /*
-    packet_t packet{
-        uint16_t cksum;
-        uint16_t len;
-        uint32_t ackno;
-        uint32_t seqno;		 Only valid if length > 8 
-        char data[500];
-    }
-
-    */
-
-    /* while there is space in the window and there is data to send */
-    while (should_send_packet(s)){
-        packet_t * packet = (packet_t *) xmalloc(512);
-        memset(packet, 0, sizeof(packet_t));
-
-        /*malloc was not successfull, return NULL*/
-	    if (packet == NULL) {
-            return;
-        }
-
-        /*conn_input returns -1 if EOF, 0 if no data, and otherwise the number of bytes read as data*/
-        read_byte = conn_input(s->c, packet->data, 500);
-        if (read_byte == -1) {
-            s->EOF_SENT = 1;
-            s->EOF_seqno = s->SND_NXT;
-            create_packet(packet, 12, SND_NXT, 0, 1);
-        } else if (read_byte == 0) {
-            free(packet); 
-		    break;
-	    } else {
-		    create_packet(packet, 12 + read_byte, SND_NXT, 0, 1);
-            
-	    }
-        s -> SND_NXT++;
-        send_packet(packet, s);
-        SND_NXT = s->SND_NXT;
-        free(packet);
-    }
-}
-
-
-/*
-typedef struct buffer_node {
-    packet_t packet;
-    long last_retransmit;
-    struct buffer_node* next;
-} buffer_node_t;
-
-typedef struct buffer {
-    buffer_node_t* head;
-} buffer_t;
-*/
-
-/*
-struct packet {
-    uint16_t cksum;
-    uint16_t len;
-    uint32_t ackno;
-    uint32_t seqno;		 Only valid if length > 8 
-    char data[500];
-};
-typedef struct packet packet_t;
-*/
-
-
-/*when conn_output receives a packet with length 0:
-    if (n == 0) {
-        c->write_eof = 1;
-        if (!c->outq)
-            shutdown (c->wfd, SHUT_WR);
-        return 0;
-    }
- */
 void rel_output (rel_t *r) {
-    /* Your logic implementation here */
 
-    buffer_node_t * first_node = buffer_get_first(r->send_buffer);
+    buffer_node_t* first_node = buffer_get_first(r->rec_buffer);
 
-    /* When we haven't rceived anything yet, we don't have to output anything*/
-    if (first_node == NULL) {
-		return;
-	}
-    /*check if packet in buffer can be sent to the output. Check whether the sequence number of the packet
-    matches the expected sequence number (RCV_NXT) and check whether there is enough space in the connection's output buffer
-    to accommodate the packet's data*/
+    if(first_node == NULL){
+        return;
+    }
 
-    packet_t * packet = &(first_node -> packet);
-    uint16_t packet_len = ntohs(packet -> len);
-    //uint32_t packet_seqno = ntohl(packet -> seqno);
-    //uint16_t packet_cksum = ntohs(packet -> cksum);
-    //uint32_t packet_ackno = ntohl(packet -> ackno);
+    packet_t* packet = &(first_node->packet);
+    uint16_t packet_length = ntohs(packet->len);
+    uint16_t packet_seqno = ntohl(packet->seqno);
+    while((first_node != NULL) &&
+          (ntohl(packet->seqno) == (uint32_t) r->RCV_NXT) &&
+          (conn_bufspace(r->c) >= (packet_length - 12))){
+        packet_length = ntohs(packet->len);
+        packet_seqno = ntohl(packet->seqno);
 
-    while(first_node != NULL && (ntohl(packet->seqno) == (uint32_t) r->RCV_NXT) && (conn_bufspace(r->c) >= (packet_len - 12))){
-        packet_len = ntohs(packet -> len);
-        //packet_seqno = ntohl(packet -> seqno);
+        if(is_EOF(packet)){
 
-        if (is_EOF(packet)) {
-            conn_output(r->c, packet->data, htons(0)); /*check above what conn_output does when length is 0*/
-            buffer_remove_first(r -> rec_buffer); /* remove EOF packet*/
-            r -> RCV_NXT++;
-            r -> EOF_RECV = 1;
+            conn_output(r->c, packet->data, htons(0)); //send a signal to output by calling conn_output with len 0
+
+            buffer_remove_first(r->rec_buffer); //remove either EOF or Data packet whatever
+            r->RCV_NXT ++;
+            r->EOF_RECV = 1;
+
+            struct ack_packet* ack_pac = xmalloc(sizeof(struct ack_packet));
+            ack_pac->ackno = htonl((uint32_t) (r->RCV_NXT));
+            ack_pac->len = htons ((uint16_t) 8);
+            ack_pac->cksum = (uint16_t) 0;
+            ack_pac->cksum = cksum(ack_pac, (int) 8);
+            conn_sendpkt(r->c, (packet_t *)ack_pac, (size_t) 8);
 
 
-        } else {
-            //int bytes_flused;
-            if (conn_bufspace(r -> c) >= (packet_len - 12)) {
-                //bytes_flushed = conn_output(r -> c, packet -> data, (size_t) packet_len - 12);
-                buffer_remove_first(r -> rec_buffer);
-                r -> RCV_NXT++;
-                r -> flushing = 0;
-			} else {
-				//int bytes_flushed = -1;
-			}
+            free(ack_pac);
+
+
+
+            if(r->EOF_ACK_RECV && r->EOF_SENT &&r->EOF_RECV && !r->flushing && buffer_size(r->send_buffer) == 0){
+
+
+                rel_destroy(r);
+                return;
+            }
+
+
+        }else{ //is not EOF!!!!!
+
+            int bytes_flushed;
+            if(conn_bufspace(r->c) >= (packet_length - 12)){
+                r->flushing = 1;
+                bytes_flushed = conn_output(r->c, packet->data, (size_t) (packet_length - 12));
+
+
+
+                buffer_remove_first(r->rec_buffer); //remove either EOF or Data packet whatever
+                r->RCV_NXT ++;
+
+                r->flushing = 0;
+
+                struct ack_packet* ack_pac = xmalloc(sizeof(struct ack_packet));
+                ack_pac->ackno = htonl((uint32_t) (r->RCV_NXT));
+                ack_pac->len = htons ((uint16_t) 8);
+                ack_pac->cksum = (uint16_t) 0;
+                ack_pac->cksum = cksum(ack_pac, (int) 8);
+
+                conn_sendpkt(r->c, (packet_t *)ack_pac, (size_t) 8);
+
+
+                free(ack_pac);
+
+            }else{
+                bytes_flushed = -1;
+
+            }
         }
 
-        struct ack_packet * ack_pac = xmalloc(sizeof(struct ack_packet));
-        create_packet((packet_t *) ack_pac, htons((uint16_t) 8), -1, htonl((uint32_t) (r -> RCV_NXT)), 0);
-        conn_sendpkt(r -> c, (packet_t *) ack_pac, (size_t) 8);
-        free(ack_pac);
-        if (isDone(r)) {
-		    rel_destroy(r);
-            return;
-		}
+
 
         first_node = buffer_get_first(r->rec_buffer);
         if(first_node != NULL){
             packet = &(first_node->packet);
         }
 
-        packet_len = ntohs(packet->len);
-        //packet_seqno = ntohl(packet->seqno);
+        packet_length = ntohs(packet->len);
+        packet_seqno = ntohl(packet->seqno);
     }
+
 }
 
 
 
 
-void rel_timer () {
+
+
+
+void
+rel_read (rel_t *s)
+{
+    int SND_UNA;
+    int SND_NXT;
+    int MAXWND;
+    int read_byte;
+    SND_UNA = s->SND_UNA;
+    SND_NXT = s->SND_NXT;
+    MAXWND = s->MAXWND;
+
+    if((s->EOF_SENT)){
+
+       return;
+    }
+
+    while(should_send_packet(s)) {
+        packet_t *packet = (packet_t *) xmalloc(512);
+        memset(packet, 0 , sizeof(packet_t));
+        read_byte = conn_input(s->c, packet->data, 500);
+
+        if (read_byte == -1) {
+            s->EOF_SENT = 1;
+            s->EOF_seqno = s->SND_NXT;
+
+            packet->len = htons((uint16_t) 12);
+            packet->ackno = htonl((uint32_t) 0); //EOF packet, ackno doesn't matter
+            packet->seqno = htonl((uint32_t) SND_NXT);
+            s->SND_NXT = s->SND_NXT + 1;
+
+            packet->cksum = (uint16_t) 0;
+            packet->cksum = cksum(packet, 12);
+
+            buffer_insert(s->send_buffer, packet, currentTimeMillis());
+            conn_sendpkt(s->c, packet, (size_t) 12);
+
+        } else if (read_byte == 0) {
+            free(packet);
+            break;
+        } else {
+            packet->len = htons((uint16_t)(12 + read_byte));
+            packet->ackno = htonl((uint32_t) 0); //data packet, ackno doesn't matter
+            packet->cksum = htons((uint16_t) 0);
+            packet->seqno = htonl((uint32_t) SND_NXT);
+            s->SND_NXT = s->SND_NXT + 1;
+
+            packet->cksum = (uint16_t) 0;
+            packet->cksum = cksum(packet, 12 + read_byte);
+
+            buffer_insert(s->send_buffer, packet, currentTimeMillis());
+
+            conn_sendpkt(s->c, packet, (size_t) (12 + read_byte));
+        }
+        free(packet);
+        SND_UNA = s->SND_UNA;
+        SND_NXT = s->SND_NXT;
+        MAXWND = s->MAXWND;
+
+    }
+}
+
+void
+rel_timer ()
+{
+
     rel_t *current = rel_list;
     while (current != NULL) {
         buffer_node_t* node = buffer_get_first(current->send_buffer);
         packet_t* packet;
         int i = 1;
+
         while(i > 0 && node != NULL){
           if(node != NULL) {
               packet = &node->packet;
               long cur_time = currentTimeMillis();
               long last_time = node->last_retransmit;
               long timeout = current->timeout;
-              
+
               if ((cur_time - last_time) >= timeout) {
+
                   conn_sendpkt(current->c, packet, (size_t)(ntohs(packet->len)));
                   node->last_retransmit = cur_time;
               }
+
           }
             i--;
             node = node->next;
         }
         current = current->next;
+
     }
 }
+
+
+
 
 
 /*helper functins */
@@ -421,14 +455,12 @@ long currentTimeMillis() {
   return s1 + s2;
 }
 
-
-
 bool isDone(rel_t * r) {
     return (r->EOF_SENT && r->EOF_RECV && r->EOF_ACK_RECV && !r -> flushing && buffer_size(r->send_buffer) == 0);
 }
 
 /*function to check if the sender can send a packet*/
-int should_send_packet(rel_t *s) {
+bool should_send_packet(rel_t *s) {
 	return (s->SND_NXT - s->SND_UNA < s->MAXWND) && (!(s->EOF_SENT));
 }
 
