@@ -13,6 +13,7 @@
 #include <netinet/in.h>
 #include <stdbool.h>
 #include <math.h>
+#include <sys/time.h>
 
 #include "rlib.h"
 #include "buffer.h"
@@ -23,10 +24,9 @@ long currentTimeMillis();
 bool isDone(rel_t * r);
 bool should_send_packet(rel_t *s);
 void send_packet(packet_t * packet, rel_t * s);
-int is_EOF(packet_t* packet);
+bool is_EOF(packet_t* packet);
 void create_packet(packet_t * packet, int len, int seqno, int ackno, int isData);
 bool is_ACK(packet_t* packet);
-int max(int num1, int num2);
 
 struct reliable_state {
     rel_t *next;			/* Linked list for traversing all connections */
@@ -80,6 +80,7 @@ struct reliable_state {
     int EOF_ACK_RECV;
     int EOF_seqno;
     int flushing;
+
 
 }; rel_t *rel_list;
 
@@ -233,7 +234,6 @@ void rel_output(rel_t *r) {
 
 
 
-
 void rel_read (rel_t *s) {
     if((s->EOF_SENT)){
        return;
@@ -290,11 +290,10 @@ void rel_timer() {
 /*helper functins */
 /*https//stackoverflow.com/questions/10098441/get-the-current-time-in-milliseconds-in-c*/
 long currentTimeMillis() {
-  struct timeval time;
-  gettimeofday(&time, NULL);
-  int64_t s1 = (int64_t)(time.tv_sec) * 1000;
-  int64_t s2 = (time.tv_usec / 1000);
-  return s1 + s2;
+    struct timeval now;
+    gettimeofday(&now, NULL);
+    long now_ms = now.tv_sec * 1000 + now.tv_usec / 1000;
+    return now_ms;
 }
 
 bool isDone(rel_t * r) {
@@ -312,7 +311,7 @@ void send_packet(packet_t * packet, rel_t * s) {
     conn_sendpkt(s->c, packet, (size_t) ntohs(packet -> len));
 }
 
-int is_EOF(packet_t* packet){
+bool is_EOF(packet_t* packet){
     return (ntohs(packet->len) == (uint16_t) 12);
 }
 
@@ -328,10 +327,6 @@ void create_packet(packet_t * packet, int len, int seqno, int ackno, int isData)
     packet -> cksum = cksum(packet, len);
  }
 
- bool is_ACK(packet_t* packet) {
+bool is_ACK(packet_t* packet) {
     return ntohs(packet->len) == 8;
-}
-
-int max(int num1, int num2) {
-    return (num1 > num2 ) ? num1 : num2;
 }
