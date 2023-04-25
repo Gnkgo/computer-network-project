@@ -256,7 +256,7 @@ void rel_read(rel_t* s) {
     while (should_send_packet(s)) {
         packet_t* packet = (packet_t*)xmalloc(512);
         memset(packet, 0, sizeof(packet_t));
-        int read_byte = conn_input(s->c, packet->data, 500);
+        int read_byte = conn_input(s -> c, packet->data, 500);
         int SND_NXT = s->SND_NXT;
 
         // If there is no more data to read, break out of the loop
