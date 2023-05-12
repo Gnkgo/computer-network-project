@@ -28,18 +28,21 @@ destination network (prefix originator). Given this definition, answer the reman
 def get_results(input_file, destination):
     with open(input_file, 'r') as f:
         updates = f.readlines()
-    prefix_set = set()
-    prefix_announce_set = set()
-    prefix_withdraw_set = set()
+
+    num_messages = set()
+    num_announce = set()
+    num_withdraw = set()
     answers = [0] * 14
 
+    message_interval_count = defaultdict(int)
+
     # Dictionary to keep track of the timestamps of the most recent update for each prefix
-    last_update_time = {}
-    longest_update_time = {}
+    last_update_time = defaultdict(int)
 
     # Dictionary to keep track of the number of bursts for each prefix
-    burst_count = defaultdict(int)
-    
+    burst_count = defaultdict(int)    
+
+    num = 0
 
     # 0, What is the number of all update messages?
     # 1, What is the number of announcements?
@@ -57,46 +60,53 @@ def get_results(input_file, destination):
     # 13. How many prefixes experience an average burst longer than 30 minutes?
     for line in tqdm(updates):
         l = line.split('|')
-        answers[0] += 1
+
         prefix = l[5]
-        timestamp = l[1]
+        timestamp = int(l[1])
+        wab = l[2]
+
+        answers[0] += 1
+        num_messages.add(prefix)
+
+        if (prefix in last_update_time and timestamp - last_update_time[prefix] >= 240):
+            message_interval_count[prefix] = 0
+
+        message_interval_count[prefix] += 1
         
+        if message_interval_count[prefix] == 2:
+            burst_count[prefix] += 1
 
-        if l[2] == 'A':
+        last_update_time[prefix] = timestamp
+
+        if wab == 'A':
             answers[1] += 1
-            prefix_announce_set.add(prefix)
-        elif l[2] == 'W':
+            num_announce.add(prefix)
+        elif wab == 'W':
             answers[2] += 1
-            prefix_withdraw_set.add(prefix)
-                    
-        if (prefix in longest_update_time):
-            if (int(timestamp) - longest_update_time[prefix] > 240):
-                burst_count[prefix] += 1
+            num_withdraw.add(prefix)
 
-        longest_update_time[prefix] = int(timestamp)
-        last_update_time[prefix] = int(timestamp)
-        prefix_set.add(prefix)
+        #duration[prefix] = (duration[prefix][0], timestamp - duration[prefix][0])
+        
     
-    answers[3] = len(prefix_set)
-    answers[4] = len(prefix_announce_set)
-    answers[5] = len(prefix_withdraw_set)
+    answers[3] = len(num_messages)
+    answers[4] = len(num_announce)
+    answers[5] = len(num_withdraw)
     answers[6] = sum(burst_count.values())
     answers[7] = max(burst_count.values())
     answers[8] = max(last_update_time.values()) - min(last_update_time.values())
+    #answers[9] = sum([duration[prefix][1] for prefix in duration]) / len(duration)
 
-        
+    for num in num_messages:
+        if num not in burst_count:
+            answers[10] += 1
 
     prefix = "number"
     data = {i+1: num for i, num in enumerate(answers)}
     with open(destination, "w") as f:
         yaml.dump(data, f)
 
-
-
-
-
 if __name__ == '__main__':
-    get_results("./test.txt", "./results/test.yaml")
+    get_results("./routeviews_project_testcases/test.txt", "./results/test.yaml")
     get_results("./routeviews_project_testcases/testcase.txt", "./results/testcase.yaml")
     #get_results(read_input("./input/updates.20150611.0845-0945.txt"), "./results/20150611.0845-0945.yaml")
     #get_results(read_input("./input/updates.20150612.0845-0945.txt"), "./results/20150612.0845-0945.yaml")
