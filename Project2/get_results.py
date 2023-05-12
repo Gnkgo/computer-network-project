@@ -59,8 +59,7 @@ def get_results(input_file, destination):
     # 12. How many prefixes experience an average burst longer than 20 minutes?
     # 13. How many prefixes experience an average burst longer than 30 minutes?
     for line in tqdm(updates):
-        l = line.split('|')
-
+        l = line.strip().split('|')
         prefix = l[5]
         timestamp = int(l[1])
         wab = l[2]
@@ -72,7 +71,7 @@ def get_results(input_file, destination):
             message_interval_count[prefix] = 0
 
         message_interval_count[prefix] += 1
-        
+
         if message_interval_count[prefix] == 2:
             burst_count[prefix] += 1
 
