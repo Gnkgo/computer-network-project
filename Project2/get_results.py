@@ -1,7 +1,7 @@
 import yaml
 from tqdm import tqdm
 from collections import defaultdict
-
+import math
 
 '''
 0) BGP Protocol
@@ -33,14 +33,17 @@ def get_results(input_file, destination):
     num_announce = set()
     num_withdraw = set()
     answers = [0] * 14
-
+    longest_burst = defaultdict(int)
     message_interval_count = defaultdict(int)
+    start_time = defaultdict(int)
+    
 
     # Dictionary to keep track of the timestamps of the most recent update for each prefix
     last_update_time = defaultdict(int)
 
     # Dictionary to keep track of the number of bursts for each prefix
     burst_count = defaultdict(int)    
+    burst_duration = defaultdict(int)
 
     num = 0
 
@@ -67,13 +70,28 @@ def get_results(input_file, destination):
         answers[0] += 1
         num_messages.add(prefix)
 
+        
+
         if (prefix in last_update_time and timestamp - last_update_time[prefix] >= 240):
             message_interval_count[prefix] = 0
+            start_time[prefix] = timestamp
 
         message_interval_count[prefix] += 1
 
         if message_interval_count[prefix] == 2:
             burst_count[prefix] += 1
+
+        if (prefix not in longest_burst):
+            longest_burst[prefix] = 0
+
+        if (prefix not in start_time):
+            start_time[prefix] = timestamp
+
+        if message_interval_count[prefix] > 1:
+            duration = timestamp - start_time[prefix]
+            duration_burst = timestamp - last_update_time[prefix]
+            longest_burst[prefix] = max(longest_burst[prefix], duration)
+            burst_duration[prefix] += duration_burst
 
         last_update_time[prefix] = timestamp
 
@@ -82,10 +100,7 @@ def get_results(input_file, destination):
             num_announce.add(prefix)
         elif wab == 'W':
             answers[2] += 1
-            num_withdraw.add(prefix)
-
-        #duration[prefix] = (duration[prefix][0], timestamp - duration[prefix][0])
-        
+            num_withdraw.add(prefix)        
     
     answers[3] = len(num_messages)
     answers[4] = len(num_announce)
@@ -93,12 +108,21 @@ def get_results(input_file, destination):
     answers[6] = sum(burst_count.values())
     answers[7] = max(burst_count.values())
     answers[8] = max(last_update_time.values()) - min(last_update_time.values())
-    #answers[9] = sum([duration[prefix][1] for prefix in duration]) / len(duration)
+    answers[9] = math.ceil((sum(longest_burst.values())) / len(longest_burst))
 
     for num in num_messages:
         if num not in burst_count:
             answers[10] += 1
 
+    for prefix in burst_count:
+        avg_burst_duration = burst_duration[prefix] / burst_count[prefix]
+        if (avg_burst_duration > 600):
+            answers[11] += 1
+        if (avg_burst_duration > 1200):
+            answers[12] += 1
+        if (avg_burst_duration > 1800):
+            answers[13] += 1
+        
     prefix = "number"
     data = {i+1: num for i, num in enumerate(answers)}
     with open(destination, "w") as f:
@@ -107,9 +131,9 @@ def get_results(input_file, destination):
 if __name__ == '__main__':
     get_results("./routeviews_project_testcases/test.txt", "./results/test.yaml")
     get_results("./routeviews_project_testcases/testcase.txt", "./results/testcase.yaml")
-    #get_results(read_input("./input/updates.20150611.0845-0945.txt"), "./results/20150611.0845-0945.yaml")
-    #get_results(read_input("./input/updates.20150612.0845-0945.txt"), "./results/20150612.0845-0945.yaml")
-    #get_results(read_input("./input/updates.20150613.0845-0945.txt"), "./results/20150613.0845-0945.yaml")
+    get_results("./input/updates.20150611.0845-0945.txt", "./results/updates.20150611.0845-0945.yaml")
+    get_results("./input/updates.20150612.0845-0945.txt", "./results/updates.20150612.0845-0945.yaml")
+    get_results("./input/updates.20150613.0845-0945.txt", "./results/updates.20150613.0845-0945.yaml")
     
 
 
