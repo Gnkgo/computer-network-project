@@ -70,8 +70,6 @@ def get_results(input_file, destination):
         answers[0] += 1
         num_messages.add(prefix)
 
-        
-
         if (prefix in last_update_time and timestamp - last_update_time[prefix] >= 240):
             message_interval_count[prefix] = 0
             start_time[prefix] = timestamp
@@ -107,7 +105,7 @@ def get_results(input_file, destination):
     answers[5] = len(num_withdraw)
     answers[6] = sum(burst_count.values())
     answers[7] = max(burst_count.values())
-    answers[8] = max(last_update_time.values()) - min(last_update_time.values())
+    answers[8] = max(longest_burst.values())
     answers[9] = math.ceil((sum(longest_burst.values())) / len(longest_burst))
 
     for num in num_messages:
